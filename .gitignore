@@ -1,20 +1,6 @@
-# Build directories
+# Build (prefer out-of-source)
 build/
 cmake-build-*/
-
-# Compiled binaries
-smart_grid_server
-*.exe
-*.out
-
-# Object files
-*.o
-*.obj
-*.so
-*.dylib
-*.dll
-
-# CMake generated files
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
@@ -22,32 +8,33 @@ Makefile
 *.cmake
 !CMakeLists.txt
 
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+# Binaries and objects
+smart_grid_server
+*.exe
+*.out
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
 env/
 venv/
+.venv/
 .env
-.venv
 
-# Logs and data
-*.log
-*.dat
-*.csv
-results/
+# Logs and benchmark outputs
 logs/
+results/
+metrics/
+*.log
+benchmark_results.csv
 
-# OS generated files
+# OS junk
 .DS_Store
 .DS_Store?
 ._*
@@ -56,17 +43,5 @@ logs/
 ehthumbs.db
 Thumbs.db
 
-# Temporary files
-*.tmp
-*.temp
-*.bak
-*.txt
-
-# Keys and certificates (security)
-*.key
-*.pem
-*.crt
-keys/
-
-# Documentation build
-docs/_build/
+# Temporary/scratch (target specific files instead of *.txt)
+combined_code.txt
