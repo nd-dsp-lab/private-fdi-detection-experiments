@@ -28,9 +28,6 @@ class AESManager:
         iv_seed.update(key + device_id.encode())
         iv = iv_seed.finalize()[:16]
 
-        if len(data) > 15:
-            data = data[:15]
-
         cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
         encryptor = cipher.encryptor()
 
@@ -39,4 +36,3 @@ class AESManager:
 
         encrypted = encryptor.update(padded_data) + encryptor.finalize()
         return encrypted
-        

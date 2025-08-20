@@ -1,40 +1,94 @@
-# Build (prefer out-of-source)
-build/
-cmake-build-*/
+# Build artifacts
 CMakeCache.txt
-CMakeFiles/
 cmake_install.cmake
 Makefile
+CMakeFiles/
 *.cmake
 !CMakeLists.txt
 
-# Binaries and objects
+# Compiled binaries
 smart_grid_server
-*.exe
-*.out
+smart_grid_server_sgx
 *.o
-*.obj
 *.so
-*.dylib
-*.dll
+*.a
+*.exe
 
-# Python
+# SGX/Gramine artifacts
+*.manifest
+*.manifest.sgx
+*.sig
+*.token
+
+# Python artifacts
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
 env/
 venv/
-.venv/
-.env
+ENV/
+env.bak/
+venv.bak/
 
-# Logs and benchmark outputs
-logs/
-results/
-metrics/
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and metrics
 *.log
+metrics/*.json
 benchmark_results.csv
+*.csv
 
-# OS junk
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+.cache/
+*.pid
+
+# Backup files
+*.bak
+*.backup
+*~
+Backup-*
+
+# Core dumps and debug files
+core
+core.*
+*.core
+*.dmp
+
+# OS generated files
 .DS_Store
 .DS_Store?
 ._*
@@ -43,5 +97,23 @@ benchmark_results.csv
 ehthumbs.db
 Thumbs.db
 
-# Temporary/scratch (target specific files instead of *.txt)
+# Package managers
+node_modules/
+.npm
+.yarn/
+
+# Test coverage
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Documentation builds
+docs/_build/
+.readthedocs.yml
+
+# Local configuration
+.env.local
+config.local.*
+
+# Temp Files
 combined_code.txt

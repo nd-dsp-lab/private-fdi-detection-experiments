@@ -17,6 +17,7 @@ CLEANUP_DONE=false
 TEMP_PID_FILE="/tmp/smart_grid_pids_$$"
 SUMMARY_CSV=""
 JQ_AVAILABLE=false
+MODE="native"
 
 # Defaults
 SERVER_BIN="./smart_grid_server"
@@ -267,10 +268,10 @@ wait_for_completion() {
       # Append to CSV if configured
       if [ -n "$SUMMARY_CSV" ]; then
         if [ ! -f "$SUMMARY_CSV" ]; then
-          echo "devices,threads,target,total_readings,seconds,throughput_rps,metrics_file" > "$SUMMARY_CSV"
+          echo "mode,devices,threads,target,total_readings,seconds,throughput_rps,metrics_file" > "$SUMMARY_CSV"
         fi
-        jq -r "[.device_count, .thread_count, .benchmark_target, .total_readings, .seconds, .throughput_rps] | @csv" "$metrics_file" \
-          | awk -v f="$metrics_file" '{print $0","f}' >> "$SUMMARY_CSV"
+        jq -r '[.device_count, .thread_count, .benchmark_target, .total_readings, .seconds, .throughput_rps] | @csv' "$metrics_file" \
+          | awk -v m="$MODE" -v f="$metrics_file" '{print m","$0","f}' >> "$SUMMARY_CSV"
       fi
     else
       echo -e "${YELLOW}[WARN]${NC} jq not found; raw metrics:"
@@ -287,7 +288,7 @@ run_single() {
 
   local sum_interval_local=$SUM_INTERVAL
   if [ "$sum_interval_local" -eq 0 ]; then
-    sum_interval_local=$(( devices / 10 ))
+    sum_interval_local=$(( devices ))
     if [ "$sum_interval_local" -lt 10 ]; then
       sum_interval_local=10
     fi

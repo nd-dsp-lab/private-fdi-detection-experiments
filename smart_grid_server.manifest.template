@@ -1,0 +1,48 @@
+# Gramine manifest for Smart Grid Server
+libos.entrypoint = "{{ entrypoint }}"
+
+loader.log_level = "{{ log_level }}"
+
+loader.env.LD_LIBRARY_PATH = "/lib:{{ arch_libdir }}:/usr/{{ arch_libdir }}"
+
+loader.insecure__use_cmdline_argv = true
+
+# Fix: Use fs.root for the root filesystem
+fs.root.type = "chroot"
+fs.root.uri = "file:."
+
+# Remove the root mount from fs.mounts and keep only the other mounts
+fs.mounts = [
+  { path = "/lib", uri = "file:{{ gramine.runtimedir() }}" },
+  { path = "{{ arch_libdir }}", uri = "file:{{ arch_libdir }}" },
+  { path = "/usr/{{ arch_libdir }}", uri = "file:/usr/{{ arch_libdir }}" },
+  { path = "/etc", uri = "file:/etc" },
+  { path = "/tmp", uri = "file:/tmp", type = "tmpfs" },
+  { path = "/metrics", uri = "file:metrics" },
+]
+
+sgx.debug = false
+sgx.enclave_size = "64G"
+sgx.max_threads = 128
+
+sgx.trusted_files = [
+  "file:{{ entrypoint }}",
+  "file:{{ gramine.libos }}",
+  "file:{{ gramine.runtimedir() }}/",
+  "file:{{ arch_libdir }}/",
+  "file:/usr/{{ arch_libdir }}/",
+]
+
+sgx.allowed_files = [
+  "file:/etc/nsswitch.conf",
+  "file:/etc/ethers",
+  "file:/etc/hosts",
+  "file:/etc/group",
+  "file:/etc/passwd",
+  "file:/etc/gai.conf",
+  "file:/etc/host.conf",
+  "file:/etc/resolv.conf",
+  "file:/proc/meminfo",
+  "file:/proc/cpuinfo",
+  "file:metrics/",
+]

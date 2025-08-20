@@ -18,9 +18,10 @@ SmartGridServer::SmartGridServer(int p, size_t devices, size_t sum_interval,
                                  size_t threads)
     : port(p),
       processor(sum_interval),
+
       thread_pool(threads > 0
           ? threads
-          : std::min(static_cast<size_t>(std::thread::hardware_concurrency() * 2), static_cast<size_t>(256))),
+          : std::min(static_cast<size_t>(std::thread::hardware_concurrency() * 2), static_cast<size_t>(120))),
       expected_devices(devices),
       log_interval(std::max(static_cast<size_t>(100), devices / 100)),
       benchmark_target(bench_target),
