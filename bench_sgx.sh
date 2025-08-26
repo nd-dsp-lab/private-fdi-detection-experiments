@@ -197,6 +197,10 @@ start_server() {
   local threads=$6
   local quiet_flag=$7
 
+  # Translate the host path to the enclave's mounted path.
+  # The manifest maps host './metrics' to enclave '/metrics'.
+  local sgx_metrics_path="${metrics_file/#\.\/metrics\//\/metrics\/}"
+
   echo -e "${BLUE}[SERVER]${NC} Starting SGX server (devices=$devices, port=$port, sum=$sum_interval, target=$bench_target)..."
 
   # For Gramine, we need to pass arguments after the manifest name
@@ -205,7 +209,7 @@ start_server() {
                "--devices" "$devices"
                "--sum-interval" "$sum_interval"
                "--benchmark-readings" "$bench_target"
-               "--metrics" "$metrics_file" )
+               "--metrics" "$sgx_metrics_path" ) # Use the corrected path here
 
   if [ "$threads" -gt 0 ]; then
     args+=( "--threads" "$threads" )
@@ -232,6 +236,7 @@ start_server() {
     return 1
   fi
 }
+
 
 
 start_devices() {
