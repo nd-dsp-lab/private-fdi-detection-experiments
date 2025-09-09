@@ -1,191 +1,118 @@
 #!/usr/bin/env python3
-# client/simulator.py (fixed connection handling)
 import asyncio
 import argparse
 import time
-import random
 import struct
-import psutil
-import os
-from datetime import datetime
-import numpy as np
+import random
 from .aes_manager import AESManager
 from .logger import Logger
 
-class BulkDeviceSimulator:
-    def __init__(self, num_devices, server_host, server_port, interval,
-                 batch_size=100, chunk_size=25, safety_mode=True):
-        self.num_devices = num_devices
-        self.server_host = server_host
-        self.server_port = server_port
-        self.interval = interval
-        self.batch_size = batch_size
-        self.chunk_size = min(chunk_size, batch_size)
-        self.safety_mode = safety_mode
-
+class BatchedCipherGenerator:
+    def __init__(self, rate_per_second, server_host="localhost", server_port=8890):
+        self.rate = rate_per_second
+        self.host = server_host
+        self.port = server_port
         self.aes_manager = AESManager()
-        self.total_messages = 0
+        self.message_count = 0
         self.total_errors = 0
-        self.cycle_count = 0
-        self.connection_semaphore = asyncio.Semaphore(50)  # Limit concurrent connections
 
-        # Pre-generate device keys
-        Logger.info(f"Pre-generating keys for {num_devices} devices...")
-        self.device_keys = {}
-        for i in range(num_devices):
+        # Calculate optimal batch size and connection count
+        self.messages_per_connection = min(50, max(5, rate_per_second // 20))
+        self.max_concurrent_connections = min(20, max(5, rate_per_second // 100))
+
+        # Pre-generate keys
+        Logger.info(f"Pre-generating keys for rate of {rate_per_second} msgs/sec...")
+        device_count = min(rate_per_second, 10000)
+        for i in range(device_count):
             device_id = f"meter_{i:06d}"
             self.aes_manager.generate_device_key(device_id)
-            self.device_keys[device_id] = i
+        Logger.success(f"Key generation complete (batch size: {self.messages_per_connection}, max connections: {self.max_concurrent_connections})")
 
-        Logger.success(f"Initialized {num_devices} device profiles")
+    def create_cipher_text(self, device_id):
+        timestamp = int(time.time()) & 0xFFFFFFFF
+        device_num = int(device_id.split('_')[1]) & 0xFFFF
 
-    def generate_bulk_readings(self):
-        """Generate readings for all devices at once"""
-        timestamp = time.time()
-        dt = datetime.fromtimestamp(timestamp)
-        hour = dt.hour
+        voltage = 1200 + random.randint(-20, 20)
+        current = 167 + random.randint(-10, 10)
+        power = 2000 + random.randint(-100, 100)
+        frequency = 60 + random.randint(-5, 5)
 
-        daily_factor = 0.7 + 0.3 * (1 + np.sin((hour - 6) * np.pi / 12))
+        data = struct.pack('>IHHHHB', timestamp, device_num, voltage, current, power, frequency)
+        encrypted = self.aes_manager.encrypt_fixed_size(device_id, data)
+        return f"{device_id}:16\n".encode() + encrypted
 
-        readings = []
-        for i in range(self.num_devices):
-            device_id = f"meter_{i:06d}"
-            device_factor = 0.8 + 0.4 * (i % 100) / 100
-            noise_factor = random.uniform(0.9, 1.1)
+    async def send_batch_on_single_connection(self, messages):
+        """Send multiple messages on a single connection"""
+        sent_count = 0
 
-            power = 2000 * daily_factor * noise_factor * device_factor
-            voltage = 120.0 + random.uniform(-2, 2)
-            frequency = 60.0 + random.uniform(-0.1, 0.1)
-            current = power / voltage
+        for attempt in range(3):
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(self.host, self.port),
+                    timeout=5.0
+                )
 
-            reading = {
-                'device_id': device_id,
-                'timestamp': timestamp,
-                'voltage': voltage,
-                'current': current,
-                'power': power,
-                'frequency': frequency
-            }
-            readings.append(reading)
+                # Send all messages in this batch
+                for msg in messages:
+                    writer.write(msg)
+                    sent_count += 1
 
-        return readings
+                # Flush all at once
+                await asyncio.wait_for(writer.drain(), timeout=10.0)
 
-    def serialize_and_encrypt_batch(self, readings):
-        """Process a batch of readings efficiently"""
-        encrypted_messages = []
+                # Close connection
+                writer.close()
+                await writer.wait_closed()
 
-        for reading in readings:
-            timestamp_int = int(reading['timestamp']) & 0xFFFFFFFF
-            voltage_int = int(reading['voltage'] * 10) & 0xFFFF
-            current_int = int(reading['current'] * 10) & 0xFFFF
-            power_int = int(reading['power']) & 0xFFFF
-            frequency_int = int(reading['frequency'] * 10) & 0xFF
-            device_num = self.device_keys[reading['device_id']] & 0xFFFF
+                return sent_count
 
-            data = struct.pack('>IHHHHB',
-                               timestamp_int, device_num, voltage_int,
-                               current_int, power_int, frequency_int)
+            except Exception as e:
+                self.total_errors += len(messages) - sent_count
+                if attempt < 2:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    sent_count = 0  # Reset for retry
+                else:
+                    Logger.error(f"Batch failed after retries: {e}")
 
-            encrypted_data = self.aes_manager.encrypt_fixed_size(reading['device_id'], data)
-            header = f"{reading['device_id']}:16\n".encode()
-            message = header + encrypted_data
-            encrypted_messages.append(message)
+        return sent_count
 
-        return encrypted_messages
+    async def send_all_messages(self, messages):
+        """Split messages into batches and send with controlled concurrency"""
 
-    async def send_chunk(self, messages):
-        """Send a chunk with improved error handling and connection management"""
-        async with self.connection_semaphore:  # Limit concurrent connections
-            max_retries = 3
-            retry_delay = 0.1
+        # Split into batches
+        batches = []
+        for i in range(0, len(messages), self.messages_per_connection):
+            batch = messages[i:i + self.messages_per_connection]
+            batches.append(batch)
 
-            for attempt in range(max_retries):
-                try:
-                    # Use shorter timeout and connection limit
-                    reader, writer = await asyncio.wait_for(
-                        asyncio.open_connection(self.server_host, self.server_port),
-                        timeout=2.0
-                    )
+        # Control concurrency with semaphore
+        semaphore = asyncio.Semaphore(self.max_concurrent_connections)
 
-                    # Send all messages in the chunk
-                    for message in messages:
-                        writer.write(message)
+        async def send_batch_with_semaphore(batch):
+            async with semaphore:
+                return await self.send_batch_on_single_connection(batch)
 
-                    # Ensure data is sent
-                    await asyncio.wait_for(writer.drain(), timeout=5.0)
+        # Send all batches concurrently
+        tasks = [send_batch_with_semaphore(batch) for batch in batches]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                    # Proper connection cleanup
-                    writer.close()
-                    await writer.wait_closed()
+        # Count successful sends
+        total_sent = 0
+        for result in results:
+            if isinstance(result, int):
+                total_sent += result
+            else:
+                Logger.error(f"Batch error: {result}")
 
-                    return True
-
-                except asyncio.TimeoutError:
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_delay * (2 ** attempt))
-                        continue
-                    else:
-                        return False
-
-                except ConnectionRefusedError:
-                    Logger.warning("Connection refused - server may be overloaded")
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_delay * (2 ** attempt))
-                        continue
-                    else:
-                        return False
-
-                except Exception as e:
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_delay * (2 ** attempt))
-                        continue
-                    else:
-                        if self.total_errors % 50 == 1:  # Log occasionally
-                            Logger.warning(f"Chunk send failed after {max_retries} attempts: {type(e).__name__}")
-                        return False
-
-    async def send_batch(self, messages):
-        """Send a batch of messages using chunked connections with rate limiting"""
-        tasks = []
-        successful = 0
-
-        # Split into smaller chunks and add delays between chunks
-        for i in range(0, len(messages), self.chunk_size):
-            chunk = messages[i:i + self.chunk_size]
-            task = asyncio.create_task(self.send_chunk(chunk))
-            tasks.append(task)
-
-            # Small delay between chunk creation to avoid overwhelming server
-            if i > 0 and i % (self.chunk_size * 4) == 0:
-                await asyncio.sleep(0.01)
-
-        # Wait for all chunks with timeout
-        try:
-            results = await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=30.0
-            )
-
-            successful = sum(1 for r in results if r is True)
-            failed = len(results) - successful
-            self.total_errors += failed
-
-        except asyncio.TimeoutError:
-            Logger.warning("Batch send timeout - some messages may have been lost")
-            # Cancel remaining tasks
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-
-        return successful
+        return total_sent
 
     async def run(self):
-        Logger.info(f"Starting bulk simulation with {self.num_devices} devices...")
+        Logger.info(f"Starting batched cipher generator at {self.rate} messages/second")
 
         # Test connection first
         try:
             reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(self.server_host, self.server_port),
+                asyncio.open_connection(self.host, self.port),
                 timeout=5.0
             )
             writer.close()
@@ -195,63 +122,74 @@ class BulkDeviceSimulator:
             Logger.error(f"Cannot connect to server: {e}")
             return
 
-        try:
-            while True:
-                cycle_start = time.time()
+        cycle_count = 0
+        device_pool_size = min(self.rate, 10000)
 
-                # Generate all readings
-                readings = self.generate_bulk_readings()
+        while True:
+            start_time = time.time()
+            cycle_count += 1
 
-                # Process in batches with rate limiting
+            # Generate messages for this cycle
+            messages = []
+            for i in range(self.rate):
+                device_id = f"meter_{i % device_pool_size:06d}"
+                cipher_text = self.create_cipher_text(device_id)
+                messages.append(cipher_text)
+
+            # Send all messages
+            try:
+                total_sent = await asyncio.wait_for(
+                    self.send_all_messages(messages),
+                    timeout=45.0
+                )
+            except asyncio.TimeoutError:
+                Logger.warning("Send timeout - some messages lost")
                 total_sent = 0
-                for i in range(0, len(readings), self.batch_size):
-                    batch = readings[i:i + self.batch_size]
-                    encrypted_messages = self.serialize_and_encrypt_batch(batch)
-                    sent_count = await self.send_batch(encrypted_messages)
-                    total_sent += sent_count
 
-                    # Small delay between batches to prevent overwhelming
-                    if i + self.batch_size < len(readings):
-                        await asyncio.sleep(0.05)
+            self.message_count += total_sent
 
-                self.total_messages += total_sent
-                self.cycle_count += 1
+            # Log progress
+            if cycle_count % 5 == 0:
+                success_rate = (total_sent / self.rate) * 100 if self.rate > 0 else 0
+                total_expected = cycle_count * self.rate
+                total_error_rate = (self.total_errors / total_expected) * 100 if total_expected > 0 else 0
 
-                # Log results
-                if self.cycle_count % 5 == 0:
-                    success_rate = (total_sent / self.num_devices) * 100 if self.num_devices > 0 else 0
-                    Logger.success(f"Cycle {self.cycle_count}: {total_sent}/{self.num_devices} sent ({success_rate:.1f}%)")
+                Logger.success(f"Cycle {cycle_count}: {total_sent}/{self.rate} sent ({success_rate:.1f}%, cumulative errors: {total_error_rate:.1f}%)")
 
-                # Wait for next interval
-                cycle_time = time.time() - cycle_start
-                sleep_time = max(0, self.interval - cycle_time)
-                if sleep_time > 0:
-                    await asyncio.sleep(sleep_time)
-
-        except KeyboardInterrupt:
-            Logger.info("Shutting down simulator...")
+            # Maintain timing
+            elapsed = time.time() - start_time
+            sleep_time = max(0, 1.0 - elapsed)
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
 
 def main():
-    parser = argparse.ArgumentParser(description="Bulk Smart Grid Device Simulator")
-    parser.add_argument("--devices", type=int, required=True, help="Number of devices to simulate")
+    parser = argparse.ArgumentParser(description="Batched Cipher Text Generator")
+    parser.add_argument("--rate", type=int, required=True, help="Messages per second to generate")
     parser.add_argument("--host", default="localhost", help="Server host")
     parser.add_argument("--port", type=int, default=8890, help="Server port")
-    parser.add_argument("--interval", type=int, default=3, help="Reporting interval (default: 3s)")
-    parser.add_argument("--batch-size", type=int, default=100, help="Batch size for processing (default: 100)")
-    parser.add_argument("--chunk-size", type=int, default=25, help="Chunk size for connections (default: 25)")
-    parser.add_argument("--no-safety", action="store_true", help="Disable safety monitoring")
+
+    # Legacy compatibility
+    parser.add_argument("--devices", type=int, help="Legacy: use --rate instead")
+    parser.add_argument("--interval", type=int, default=1, help="Legacy: always 1 second")
+    parser.add_argument("--batch-size", type=int, help="Legacy: ignored")
+    parser.add_argument("--chunk-size", type=int, help="Legacy: ignored")
+    parser.add_argument("--no-safety", action="store_true", help="Legacy: ignored")
 
     args = parser.parse_args()
 
-    simulator = BulkDeviceSimulator(
-        args.devices, args.host, args.port, args.interval,
-        args.batch_size, args.chunk_size, not args.no_safety
-    )
+    # Handle legacy arguments
+    if args.devices and not args.rate:
+        rate = args.devices // args.interval
+        Logger.warning(f"Using legacy --devices argument: {args.devices} devices / {args.interval}s = {rate} msgs/sec")
+    else:
+        rate = args.rate
+
+    generator = BatchedCipherGenerator(rate, args.host, args.port)
 
     try:
-        asyncio.run(simulator.run())
+        asyncio.run(generator.run())
     except KeyboardInterrupt:
-        Logger.info("Simulator stopped by user")
+        Logger.info("Generator stopped by user")
 
 if __name__ == "__main__":
     main()

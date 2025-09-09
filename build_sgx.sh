@@ -19,7 +19,7 @@ fi
 # Generate Gramine manifest
 echo "Generating Gramine manifest..."
 gramine-manifest \
-    -Dlog_level=error \
+    -Dlog_level=debug \
     -Dentrypoint=./smart_grid_server_sgx \
     -Darch_libdir=/lib/x86_64-linux-gnu \
     smart_grid_server.manifest.template \

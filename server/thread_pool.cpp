@@ -26,7 +26,15 @@ ThreadPool::~ThreadPool() {
         stop = true;
     }
     condition.notify_all();
+
+    // Wait for all threads to finish
     for (std::thread &worker : workers) {
-        worker.join();
+        if (worker.joinable()) {  // Add joinable check
+            worker.join();
+        }
     }
+
+    // Clear any remaining tasks
+    std::queue<std::function<void()>> empty;
+    tasks.swap(empty);
 }

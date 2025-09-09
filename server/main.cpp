@@ -2,6 +2,18 @@
 #include "server.hpp"
 #include "logger.hpp"
 #include <iostream>
+#include <string>
+#include <csignal>
+#include <memory>
+
+std::unique_ptr<SmartGridServer> server_instance;
+
+void signal_handler(int signal) {
+    Logger::info("Received signal " + std::to_string(signal) + " - shutting down gracefully");
+    if (server_instance) {
+        server_instance->stop();
+    }
+}
 
 void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << " [OPTIONS]\n"
@@ -10,7 +22,8 @@ void print_usage(const char* program_name) {
               << "  -d, --devices NUM           Expected number of devices (default: 100)\n"
               << "  -s, --sum-interval NUM      Sum every N readings (default: devices/10)\n"
               << "      --benchmark-readings N  Stop after N readings and write metrics\n"
-              << "      --metrics FILE          Write JSON metrics to FILE\n"
+              << "      --benchmark-sums N      Stop after N power summations and write metrics\n"
+              << "      --metrics FILE          Write CSV metrics to FILE\n"
               << "      --threads N             Use N worker threads (default: auto)\n"
               << "      --quiet                 Suppress periodic logs\n"
               << "  -h, --help                  Show this help\n";
@@ -21,6 +34,7 @@ int main(int argc, char* argv[]) {
     size_t expected_devices = 100;
     size_t sum_interval = 0;
     size_t benchmark_readings = 0;
+    size_t benchmark_sums = 0;
     std::string metrics_file;
     size_t threads = 0;
     bool quiet = false;
@@ -39,6 +53,8 @@ int main(int argc, char* argv[]) {
             sum_interval = std::stoull(argv[++i]);
         } else if (arg == "--benchmark-readings" && i + 1 < argc) {
             benchmark_readings = std::stoull(argv[++i]);
+        } else if (arg == "--benchmark-sums" && i + 1 < argc) {
+            benchmark_sums = std::stoull(argv[++i]);
         } else if (arg == "--metrics" && i + 1 < argc) {
             metrics_file = argv[++i];
         } else if (arg == "--threads" && i + 1 < argc) {
@@ -53,7 +69,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (sum_interval == 0) {
-        sum_interval = std::max(static_cast<size_t>(10), expected_devices / 10);
+        sum_interval = expected_devices;
     }
 
     std::cout << CYAN BOLD "Smart Grid Server v2.1" RESET << std::endl;
@@ -63,10 +79,16 @@ int main(int argc, char* argv[]) {
               << ", Threads=" << (threads ? std::to_string(threads) : std::string("auto"))
               << RESET << std::endl;
 
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+
     SmartGridServer server(port, expected_devices, sum_interval,
-                           benchmark_readings, metrics_file, quiet, threads);
+                           benchmark_readings, benchmark_sums, metrics_file, quiet, threads);
     if (!server.start()) return 1;
 
+    global_server.store(&server);
     server.run();
+    global_server.store(nullptr);
+
     return 0;
 }

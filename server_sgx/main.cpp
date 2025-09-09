@@ -14,9 +14,9 @@ void print_usage(const char* program_name) {
               << "Options:\n"
               << "  -p, --port PORT             Server port (default: 8890)\n"
               << "  -d, --devices NUM           Expected number of devices (default: 100)\n"
-              << "  -s, --sum-interval NUM      Sum every N readings (default: devices/10)\n"
-              << "      --benchmark-readings N  Stop after N readings and write metrics\n"
-              << "      --metrics FILE          Write JSON metrics to FILE\n"
+              << "  -s, --sum-interval NUM      Sum every N readings (default: devices)\n"
+              << "      --benchmark-sums N      Stop after N power summations and write metrics\n"
+              << "      --metrics FILE          Write CSV metrics to FILE\n"
               << "      --threads N             Use N worker threads (default: auto)\n"
               << "      --quiet                 Suppress periodic logs\n"
               << "  -h, --help                  Show this help\n";
@@ -29,12 +29,12 @@ int main(int argc, char* argv[]) {
     int port = 8890;
     size_t expected_devices = 100;
     size_t sum_interval = 0;
-    size_t benchmark_readings = 0;
+    size_t benchmark_sums = 0; // <-- ADDED
     std::string metrics_file;
     size_t threads = 0;
     bool quiet = false;
 
-    // Parse arguments (same as original)
+    // Parse arguments (updated to match native)
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
 
@@ -47,8 +47,8 @@ int main(int argc, char* argv[]) {
             expected_devices = std::stoull(argv[++i]);
         } else if ((arg == "-s" || arg == "--sum-interval") && i + 1 < argc) {
             sum_interval = std::stoull(argv[++i]);
-        } else if (arg == "--benchmark-readings" && i + 1 < argc) {
-            benchmark_readings = std::stoull(argv[++i]);
+        } else if (arg == "--benchmark-sums" && i + 1 < argc) { // <-- ADDED
+            benchmark_sums = std::stoull(argv[++i]);
         } else if (arg == "--metrics" && i + 1 < argc) {
             metrics_file = argv[++i];
         } else if (arg == "--threads" && i + 1 < argc) {
@@ -63,7 +63,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (sum_interval == 0) {
-        sum_interval = std::max(static_cast<size_t>(10), expected_devices / 10);
+        sum_interval = expected_devices;
     }
 
     std::cout << CYAN BOLD "SGX Smart Grid Server v2.1" RESET << std::endl;
@@ -74,8 +74,9 @@ int main(int argc, char* argv[]) {
               << ", Threads=" << (threads ? std::to_string(threads) : std::string("auto"))
               << RESET << std::endl;
 
+    // Pass benchmark_sums to the constructor
     SmartGridServer server(port, expected_devices, sum_interval,
-                           benchmark_readings, metrics_file, quiet, threads);
+                           0, benchmark_sums, metrics_file, quiet, threads); // <-- UPDATED
     if (!server.start()) return 1;
 
     server.run();
